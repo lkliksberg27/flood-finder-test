@@ -71,11 +71,12 @@ function HomePage() {
       .select("*")
       .order("device_id");
     if (data) {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+      // Only show sensors with readings in last 10 minutes (real hardware only, no seed data)
+      const tenMinAgo = new Date(Date.now() - 10 * 60000).toISOString();
       const { data: recentReadings } = await sb
         .from("sensor_readings")
         .select("device_id, recorded_at")
-        .gte("recorded_at", sevenDaysAgo)
+        .gte("recorded_at", tenMinAgo)
         .order("recorded_at", { ascending: false });
 
       const recentDeviceIds = new Set(
