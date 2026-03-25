@@ -247,27 +247,27 @@ function HomePage() {
               <InfoCard label="Status" value={selectedDevice.status} color={selectedDevice.status === "online" ? "#34d399" : "#f87171"} />
             </div>
 
-            {/* Latest Reading */}
+            {/* Big Raw Distance Display */}
             {latestReading && (
-              <div style={{ background: "#1f2937", borderRadius: 8, padding: 12, marginBottom: 16 }}>
-                <h3 style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8 }}>LATEST READING</h3>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, fontSize: 13 }}>
-                  <div>Distance: <b>{latestReading.distance_cm}cm</b></div>
-                  <div>Flood Depth: <b style={{ color: latestReading.flood_depth_cm > 0 ? "#f87171" : "#34d399" }}>
-                    {latestReading.flood_depth_cm}cm
-                  </b></div>
-                  <div>Water: <b>{latestReading.water_detected ? "YES" : "No"}</b></div>
-                  <div>Battery: <b>{latestReading.battery_v?.toFixed(2)}V</b></div>
-                  {latestReading.lat != null && latestReading.lat !== 0 && (
-                    <div>Lat: <b>{latestReading.lat.toFixed(6)}</b></div>
-                  )}
-                  {latestReading.lng != null && latestReading.lng !== 0 && (
-                    <div>Lng: <b>{latestReading.lng.toFixed(6)}</b></div>
-                  )}
+              <div style={{ background: "#1f2937", borderRadius: 12, padding: 16, marginBottom: 16, textAlign: "center" }}>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>RAW DISTANCE</div>
+                <div style={{ fontSize: 48, fontWeight: 800, color: "#3b82f6", lineHeight: 1 }}>
+                  {latestReading.distance_cm}
+                  <span style={{ fontSize: 20, color: "#6b7280" }}>cm</span>
                 </div>
-                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
-                  {new Date(latestReading.recorded_at).toLocaleString()}
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 8 }}>
+                  {new Date(latestReading.recorded_at).toLocaleTimeString()}
                 </div>
+              </div>
+            )}
+
+            {/* Other Data */}
+            {latestReading && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+                <InfoCard label="Flood Depth" value={`${latestReading.flood_depth_cm}cm`} color={latestReading.flood_depth_cm > 0 ? "#f87171" : "#34d399"} />
+                <InfoCard label="Water" value={latestReading.water_detected ? "YES" : "No"} color={latestReading.water_detected ? "#f87171" : "#34d399"} />
+                <InfoCard label="Battery" value={`${latestReading.battery_v?.toFixed(2)}V`} />
+                <InfoCard label="Baseline" value={`${selectedDevice.baseline_distance_cm ?? "—"}cm`} />
               </div>
             )}
 
