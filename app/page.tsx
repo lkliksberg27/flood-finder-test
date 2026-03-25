@@ -1,14 +1,34 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { createClient } from "@supabase/supabase-js";
-import mapboxgl from "mapbox-gl";
+import dynamic from "next/dynamic";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let supabase: SupabaseClient | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let mapboxgl: any = null;
+
+function getSupabase(): SupabaseClient {
+  if (!supabase) {
+    // Dynamic require to prevent server-side execution
+    const { createClient } = require("@supabase/supabase-js");
+    supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return supabase!;
+}
+
+function getMapboxgl() {
+  if (!mapboxgl) {
+    // Dynamic require to prevent server-side execution (mapbox-gl needs DOM)
+    mapboxgl = require("mapbox-gl");
+    mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
+  }
+  return mapboxgl;
+}
 
 interface Device {
   device_id: string;
@@ -33,40 +53,43 @@ interface Reading {
   recorded_at: string;
 }
 
-export default function Home() {
+function HomePage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [readings, setReadings] = useState<Reading[]>([]);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapRef = useRef<any>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
-  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markersRef = useRef<any[]>([]);
 
-  // Only show devices with real data (last_seen in last 7 days, non-zero lat/lng or recent readings)
   const fetchDevices = useCallback(async () => {
-    const { data } = await supabase
+    const sb = getSupabase();
+    const { data } = await sb
       .from("devices")
       .select("*")
       .order("device_id");
     if (data) {
-      // Get devices that have recent readings (last 7 days)
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
-      const { data: recentReadings } = await supabase
+      const { data: recentReadings } = await sb
         .from("sensor_readings")
         .select("device_id, recorded_at")
         .gte("recorded_at", sevenDaysAgo)
         .order("recorded_at", { ascending: false });
 
       const recentDeviceIds = new Set(
-        (recentReadings || []).map((r) => r.device_id)
+        (recentReadings || []).map((r: { device_id: string }) => r.device_id)
       );
 
-      // Show all devices but highlight ones with recent real data
-      setDevices(data.filter((d) => recentDeviceIds.has(d.device_id)));
+      setDevices(data.filter((d: Device) => recentDeviceIds.has(d.device_id)));
     }
+    setLastRefresh(new Date());
   }, []);
 
   const fetchReadings = useCallback(async (deviceId: string) => {
-    const { data } = await supabase
+    const sb = getSupabase();
+    const { data } = await sb
       .from("sensor_readings")
       .select("*")
       .eq("device_id", deviceId)
@@ -75,45 +98,52 @@ export default function Home() {
     if (data) setReadings(data);
   }, []);
 
+  // Fetch devices on mount and auto-refresh every 10 seconds
   useEffect(() => {
     fetchDevices();
-    const interval = setInterval(fetchDevices, 30000);
+    const interval = setInterval(fetchDevices, 10000);
     return () => clearInterval(interval);
   }, [fetchDevices]);
 
+  // Fetch readings when device selected
   useEffect(() => {
     if (selected) fetchReadings(selected);
   }, [selected, fetchReadings]);
 
-  // Auto-refresh readings every 15s
+  // Auto-refresh readings every 10 seconds
   useEffect(() => {
     if (!selected) return;
-    const interval = setInterval(() => fetchReadings(selected), 15000);
+    const interval = setInterval(() => fetchReadings(selected), 10000);
     return () => clearInterval(interval);
   }, [selected, fetchReadings]);
 
-  // Map
+  // Initialize map (client-side only)
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return;
-    mapRef.current = new mapboxgl.Map({
+    const mb = getMapboxgl();
+    mapRef.current = new mb.Map({
       container: mapContainer.current,
       style: "mapbox://styles/mapbox/dark-v11",
       center: [-80.12, 25.965],
       zoom: 14,
     });
-    return () => { mapRef.current?.remove(); mapRef.current = null; };
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
   }, []);
 
   // Update markers
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    const mb = getMapboxgl();
 
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
     devices.forEach((d) => {
-      if (d.lat === 0 && d.lng === 0) return; // skip no-GPS devices
+      if (d.lat === 0 && d.lng === 0) return;
 
       const el = document.createElement("div");
       el.style.width = "14px";
@@ -124,13 +154,12 @@ export default function Home() {
       el.style.cursor = "pointer";
       el.onclick = () => setSelected(d.device_id);
 
-      const marker = new mapboxgl.Marker(el)
+      const marker = new mb.Marker(el)
         .setLngLat([d.lng, d.lat])
         .addTo(map);
       markersRef.current.push(marker);
     });
 
-    // If selected device has coords, fly to it
     const sel = devices.find((d) => d.device_id === selected);
     if (sel && sel.lat !== 0 && sel.lng !== 0) {
       map.flyTo({ center: [sel.lng, sel.lat], zoom: 16 });
@@ -151,7 +180,12 @@ export default function Home() {
           Flood Finder Test
         </h1>
         <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 20 }}>
-          Live sensor data from Supabase
+          Live sensor data &middot; Auto-refresh every 10s
+          {lastRefresh && (
+            <span style={{ marginLeft: 8, color: "#4b5563" }}>
+              Last: {lastRefresh.toLocaleTimeString()}
+            </span>
+          )}
         </p>
 
         {/* Device List */}
@@ -178,7 +212,7 @@ export default function Home() {
                   fontSize: 10,
                   padding: "2px 6px",
                   borderRadius: 4,
-                  background: d.status === "online" ? "#059669" + "22" : "#dc2626" + "22",
+                  background: d.status === "online" ? "#05966922" : "#dc262622",
                   color: d.status === "online" ? "#34d399" : "#f87171",
                 }}>
                   {d.status.toUpperCase()}
@@ -206,9 +240,9 @@ export default function Home() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
               <InfoCard label="GPS Lat" value={selectedDevice.lat === 0 ? "No fix" : selectedDevice.lat.toFixed(6)} />
               <InfoCard label="GPS Lng" value={selectedDevice.lng === 0 ? "No fix" : selectedDevice.lng.toFixed(6)} />
-              <InfoCard label="Baro Altitude" value={selectedDevice.altitude_baro != null ? `${selectedDevice.altitude_baro.toFixed(2)}m` : "—"} />
-              <InfoCard label="Baseline" value={selectedDevice.baseline_distance_cm != null ? `${selectedDevice.baseline_distance_cm}cm` : "—"} />
-              <InfoCard label="Battery" value={selectedDevice.battery_v != null ? `${selectedDevice.battery_v.toFixed(2)}V` : "—"} />
+              <InfoCard label="Baro Altitude" value={selectedDevice.altitude_baro != null ? `${selectedDevice.altitude_baro.toFixed(2)}m` : "\u2014"} />
+              <InfoCard label="Baseline Dist" value={selectedDevice.baseline_distance_cm != null ? `${selectedDevice.baseline_distance_cm}cm` : "\u2014"} />
+              <InfoCard label="Battery" value={selectedDevice.battery_v != null ? `${selectedDevice.battery_v.toFixed(2)}V` : "\u2014"} />
               <InfoCard label="Status" value={selectedDevice.status} color={selectedDevice.status === "online" ? "#34d399" : "#f87171"} />
             </div>
 
@@ -218,11 +252,17 @@ export default function Home() {
                 <h3 style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8 }}>LATEST READING</h3>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, fontSize: 13 }}>
                   <div>Distance: <b>{latestReading.distance_cm}cm</b></div>
-                  <div>Flood: <b style={{ color: latestReading.flood_depth_cm > 0 ? "#f87171" : "#34d399" }}>
+                  <div>Flood Depth: <b style={{ color: latestReading.flood_depth_cm > 0 ? "#f87171" : "#34d399" }}>
                     {latestReading.flood_depth_cm}cm
                   </b></div>
                   <div>Water: <b>{latestReading.water_detected ? "YES" : "No"}</b></div>
                   <div>Battery: <b>{latestReading.battery_v?.toFixed(2)}V</b></div>
+                  {latestReading.lat != null && latestReading.lat !== 0 && (
+                    <div>Lat: <b>{latestReading.lat.toFixed(6)}</b></div>
+                  )}
+                  {latestReading.lng != null && latestReading.lng !== 0 && (
+                    <div>Lng: <b>{latestReading.lng.toFixed(6)}</b></div>
+                  )}
                 </div>
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
                   {new Date(latestReading.recorded_at).toLocaleString()}
@@ -279,3 +319,6 @@ function InfoCard({ label, value, color }: { label: string; value: string; color
     </div>
   );
 }
+
+// Use dynamic import with ssr: false to prevent any server-side rendering
+export default dynamic(() => Promise.resolve(HomePage), { ssr: false });
